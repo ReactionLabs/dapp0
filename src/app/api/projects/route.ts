@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { sql } from '@/lib/neon/server'
 import { z } from 'zod'
 
 const CreateProjectSchema = z.object({
@@ -22,8 +22,6 @@ const UpdateProjectSchema = z.object({
 // GET /api/projects - List user's projects
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
-    
     // Get user ID from session (you'll need to implement proper session handling)
     const userId = request.headers.get('x-user-id')
     if (!userId) {
@@ -33,15 +31,11 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const { data: projects, error } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false })
-
-    if (error) {
-      throw new Error(`Failed to fetch projects: ${error.message}`)
-    }
+    const projects = await sql`
+      SELECT * FROM projects 
+      WHERE user_id = ${userId}
+      ORDER BY updated_at DESC
+    `
 
     return NextResponse.json({
       success: true,
@@ -62,8 +56,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { name, type, chain, generatedCode, messages, isPublic } = CreateProjectSchema.parse(body)
 
-    const supabase = createServerSupabaseClient()
-    
     // Get user ID from session
     const userId = request.headers.get('x-user-id')
     if (!userId) {
@@ -73,23 +65,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data: project, error } = await supabase
-      .from('projects')
-      .insert({
-        user_id: userId,
-        name,
-        type,
-        chain,
-        generated_code: generatedCode,
-        messages,
-        is_public: isPublic
-      })
-      .select()
-      .single()
-
-    if (error) {
-      throw new Error(`Failed to create project: ${error.message}`)
-    }
+    const [project] = await sql`
+      INSERT INTO projects (user_id, name, type, chain, generated_code, messages, is_public)
+      VALUES (${userId}, ${name}, ${type}, ${chain}, ${generatedCode}, ${JSON.stringify(messages)}, ${isPublic})
+      RETURNING *
+    `
 
     return NextResponse.json({
       success: true,

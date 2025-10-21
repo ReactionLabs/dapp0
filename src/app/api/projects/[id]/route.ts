@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { sql } from '@/lib/neon/server'
 import { z } from 'zod'
 
 const UpdateProjectSchema = z.object({
@@ -16,8 +16,6 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = createServerSupabaseClient()
-    
     // Get user ID from session
     const userId = request.headers.get('x-user-id')
     if (!userId) {
@@ -27,21 +25,16 @@ export async function GET(
       )
     }
 
-    const { data: project, error } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('id', params.id)
-      .eq('user_id', userId)
-      .single()
+    const [project] = await sql`
+      SELECT * FROM projects 
+      WHERE id = ${params.id} AND user_id = ${userId}
+    `
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return NextResponse.json(
-          { success: false, error: 'Project not found' },
-          { status: 404 }
-        )
-      }
-      throw new Error(`Failed to fetch project: ${error.message}`)
+    if (!project) {
+      return NextResponse.json(
+        { success: false, error: 'Project not found' },
+        { status: 404 }
+      )
     }
 
     return NextResponse.json({
@@ -66,8 +59,6 @@ export async function PUT(
     const body = await request.json()
     const updateData = UpdateProjectSchema.parse(body)
 
-    const supabase = createServerSupabaseClient()
-    
     // Get user ID from session
     const userId = request.headers.get('x-user-id')
     if (!userId) {
@@ -77,22 +68,53 @@ export async function PUT(
       )
     }
 
-    const { data: project, error } = await supabase
-      .from('projects')
-      .update(updateData)
-      .eq('id', params.id)
-      .eq('user_id', userId)
-      .select()
-      .single()
+    // Build dynamic update query
+    const updateFields = []
+    const updateValues = []
+    
+    if (updateData.name !== undefined) {
+      updateFields.push('name = $' + (updateFields.length + 1))
+      updateValues.push(updateData.name)
+    }
+    if (updateData.generatedCode !== undefined) {
+      updateFields.push('generated_code = $' + (updateFields.length + 1))
+      updateValues.push(updateData.generatedCode)
+    }
+    if (updateData.messages !== undefined) {
+      updateFields.push('messages = $' + (updateFields.length + 1))
+      updateValues.push(JSON.stringify(updateData.messages))
+    }
+    if (updateData.isPublic !== undefined) {
+      updateFields.push('is_public = $' + (updateFields.length + 1))
+      updateValues.push(updateData.isPublic)
+    }
+    if (updateData.githubRepoUrl !== undefined) {
+      updateFields.push('github_repo_url = $' + (updateFields.length + 1))
+      updateValues.push(updateData.githubRepoUrl)
+    }
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return NextResponse.json(
-          { success: false, error: 'Project not found' },
-          { status: 404 }
-        )
-      }
-      throw new Error(`Failed to update project: ${error.message}`)
+    if (updateFields.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'No fields to update' },
+        { status: 400 }
+      )
+    }
+
+    updateFields.push('updated_at = NOW()')
+    updateValues.push(params.id, userId)
+
+    const [project] = await sql`
+      UPDATE projects 
+      SET ${sql(updateFields.join(', '))}
+      WHERE id = ${params.id} AND user_id = ${userId}
+      RETURNING *
+    `
+
+    if (!project) {
+      return NextResponse.json(
+        { success: false, error: 'Project not found' },
+        { status: 404 }
+      )
     }
 
     return NextResponse.json({
@@ -114,8 +136,6 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const supabase = createServerSupabaseClient()
-    
     // Get user ID from session
     const userId = request.headers.get('x-user-id')
     if (!userId) {
@@ -125,14 +145,16 @@ export async function DELETE(
       )
     }
 
-    const { error } = await supabase
-      .from('projects')
-      .delete()
-      .eq('id', params.id)
-      .eq('user_id', userId)
+    const result = await sql`
+      DELETE FROM projects 
+      WHERE id = ${params.id} AND user_id = ${userId}
+    `
 
-    if (error) {
-      throw new Error(`Failed to delete project: ${error.message}`)
+    if (result.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'Project not found' },
+        { status: 404 }
+      )
     }
 
     return NextResponse.json({
