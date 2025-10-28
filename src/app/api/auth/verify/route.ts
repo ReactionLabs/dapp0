@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { databaseService } from '@/lib/neon/client'
 import { ChainType } from '@/lib/chain-config'
 
 const VerifyRequestSchema = z.object({
@@ -25,61 +25,23 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const supabase = createServerSupabaseClient()
-
     // Check if wallet exists
-    const { data: existingWallet, error: walletError } = await supabase
-      .from('wallets')
-      .select(`
-        *,
-        users (*)
-      `)
-      .eq('wallet_address', walletAddress)
-      .single()
+    let user = await databaseService.getUserByWalletAddress(walletAddress)
 
-    let user
-
-    if (existingWallet && !walletError) {
-      // Wallet exists, return user
-      user = {
-        id: existingWallet.users.id,
-        email: existingWallet.users.email,
-        username: existingWallet.users.username,
-        avatar_url: existingWallet.users.avatar_url,
-        github_username: existingWallet.users.github_username,
-        wallets: [existingWallet],
-        created_at: existingWallet.users.created_at
-      }
-    } else {
+    if (!user) {
       // Create new user and wallet
-      const { data: newUser, error: userError } = await supabase
-        .from('users')
-        .insert({
-          email: null,
-          username: null
-        })
-        .select()
-        .single()
-
-      if (userError) {
-        throw new Error(`Failed to create user: ${userError.message}`)
-      }
+      const newUser = await databaseService.createUser({
+        email: null,
+        username: null
+      })
 
       // Create wallet
-      const { data: newWallet, error: walletCreateError } = await supabase
-        .from('wallets')
-        .insert({
-          user_id: newUser.id,
-          wallet_address: walletAddress,
-          chain_type: chain,
-          is_primary: true
-        })
-        .select()
-        .single()
-
-      if (walletCreateError) {
-        throw new Error(`Failed to create wallet: ${walletCreateError.message}`)
-      }
+      const newWallet = await databaseService.createWallet({
+        user_id: newUser.id,
+        wallet_address: walletAddress,
+        chain_type: chain,
+        is_primary: true
+      })
 
       user = {
         id: newUser.id,

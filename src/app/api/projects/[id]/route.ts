@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { sql } from '@/lib/neon/server'
+import { databaseService } from '@/lib/neon/client'
 import { z } from 'zod'
 
 const UpdateProjectSchema = z.object({
@@ -25,10 +25,7 @@ export async function GET(
       )
     }
 
-    const [project] = await sql`
-      SELECT * FROM projects 
-      WHERE id = ${params.id} AND user_id = ${userId}
-    `
+    const project = await databaseService.getProjectById(params.id, userId)
 
     if (!project) {
       return NextResponse.json(
@@ -68,47 +65,32 @@ export async function PUT(
       )
     }
 
-    // Build dynamic update query
-    const updateFields = []
-    const updateValues = []
+    const updateFields: any = {}
     
     if (updateData.name !== undefined) {
-      updateFields.push('name = $' + (updateFields.length + 1))
-      updateValues.push(updateData.name)
+      updateFields.name = updateData.name
     }
     if (updateData.generatedCode !== undefined) {
-      updateFields.push('generated_code = $' + (updateFields.length + 1))
-      updateValues.push(updateData.generatedCode)
+      updateFields.generated_code = updateData.generatedCode
     }
     if (updateData.messages !== undefined) {
-      updateFields.push('messages = $' + (updateFields.length + 1))
-      updateValues.push(JSON.stringify(updateData.messages))
+      updateFields.messages = updateData.messages
     }
     if (updateData.isPublic !== undefined) {
-      updateFields.push('is_public = $' + (updateFields.length + 1))
-      updateValues.push(updateData.isPublic)
+      updateFields.is_public = updateData.isPublic
     }
     if (updateData.githubRepoUrl !== undefined) {
-      updateFields.push('github_repo_url = $' + (updateFields.length + 1))
-      updateValues.push(updateData.githubRepoUrl)
+      updateFields.github_repo_url = updateData.githubRepoUrl
     }
 
-    if (updateFields.length === 0) {
+    if (Object.keys(updateFields).length === 0) {
       return NextResponse.json(
         { success: false, error: 'No fields to update' },
         { status: 400 }
       )
     }
 
-    updateFields.push('updated_at = NOW()')
-    updateValues.push(params.id, userId)
-
-    const [project] = await sql`
-      UPDATE projects 
-      SET ${sql(updateFields.join(', '))}
-      WHERE id = ${params.id} AND user_id = ${userId}
-      RETURNING *
-    `
+    const project = await databaseService.updateProject(params.id, userId, updateFields)
 
     if (!project) {
       return NextResponse.json(
@@ -145,17 +127,7 @@ export async function DELETE(
       )
     }
 
-    const result = await sql`
-      DELETE FROM projects 
-      WHERE id = ${params.id} AND user_id = ${userId}
-    `
-
-    if (result.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'Project not found' },
-        { status: 404 }
-      )
-    }
+    await databaseService.deleteProject(params.id, userId)
 
     return NextResponse.json({
       success: true,

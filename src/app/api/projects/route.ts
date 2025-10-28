@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { sql } from '@/lib/neon/server'
+import { databaseService } from '@/lib/neon/client'
 import { z } from 'zod'
 
 const CreateProjectSchema = z.object({
@@ -31,11 +31,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const projects = await sql`
-      SELECT * FROM projects 
-      WHERE user_id = ${userId}
-      ORDER BY updated_at DESC
-    `
+    const projects = await databaseService.getProjectsByUserId(userId)
 
     return NextResponse.json({
       success: true,
@@ -65,11 +61,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const [project] = await sql`
-      INSERT INTO projects (user_id, name, type, chain, generated_code, messages, is_public)
-      VALUES (${userId}, ${name}, ${type}, ${chain}, ${generatedCode}, ${JSON.stringify(messages)}, ${isPublic})
-      RETURNING *
-    `
+    const project = await databaseService.createProject({
+      user_id: userId,
+      name,
+      type,
+      chain,
+      generated_code: generatedCode,
+      messages,
+      is_public: isPublic
+    })
 
     return NextResponse.json({
       success: true,

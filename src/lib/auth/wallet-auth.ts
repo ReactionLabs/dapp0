@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase/client'
+import { databaseService } from '@/lib/neon/client'
 import nacl from 'tweetnacl'
 import bs58 from 'bs58'
 import { ChainType } from '@/lib/chain-config'
@@ -28,7 +28,7 @@ export interface ProfileData {
 }
 
 export class WalletAuthService {
-  private supabase = supabase
+  private db = databaseService
 
   // Generate nonce for signature
   async generateNonce(walletAddress: string): Promise<string> {
@@ -135,57 +135,34 @@ export class WalletAuthService {
   async getOrCreateUser(walletAddress: string, chain: ChainType): Promise<User> {
     try {
       // First, check if wallet exists
-      const { data: existingWallet, error: walletError } = await this.supabase
-        .from('wallets')
-        .select(`
-          *,
-          users (*)
-        `)
-        .eq('wallet_address', walletAddress)
-        .single()
+      const existingUser = await this.db.getUserByWalletAddress(walletAddress)
 
-      if (existingWallet && !walletError) {
+      if (existingUser) {
         // Wallet exists, return user
         return {
-          id: existingWallet.users.id,
-          email: existingWallet.users.email,
-          username: existingWallet.users.username,
-          avatar_url: existingWallet.users.avatar_url,
-          github_username: existingWallet.users.github_username,
-          wallets: [existingWallet],
-          created_at: existingWallet.users.created_at
+          id: existingUser.id,
+          email: existingUser.email,
+          username: existingUser.username,
+          avatar_url: existingUser.avatar_url,
+          github_username: existingUser.github_username,
+          wallets: existingUser.wallets,
+          created_at: existingUser.created_at
         }
       }
 
       // Create new user and wallet
-      const { data: newUser, error: userError } = await this.supabase
-        .from('users')
-        .insert({
-          email: null,
-          username: null
-        })
-        .select()
-        .single()
-
-      if (userError) {
-        throw new Error(`Failed to create user: ${userError.message}`)
-      }
+      const newUser = await this.db.createUser({
+        email: null,
+        username: null
+      })
 
       // Create wallet
-      const { data: newWallet, error: walletCreateError } = await this.supabase
-        .from('wallets')
-        .insert({
-          user_id: newUser.id,
-          wallet_address: walletAddress,
-          chain_type: chain,
-          is_primary: true
-        })
-        .select()
-        .single()
-
-      if (walletCreateError) {
-        throw new Error(`Failed to create wallet: ${walletCreateError.message}`)
-      }
+      const newWallet = await this.db.createWallet({
+        user_id: newUser.id,
+        wallet_address: walletAddress,
+        chain_type: chain,
+        is_primary: true
+      })
 
       return {
         id: newUser.id,
@@ -220,17 +197,9 @@ export class WalletAuthService {
       const userId = localStorage.getItem('dapp0_user_id')
       if (!userId) return null
 
-      const { data: user, error } = await this.supabase
-        .from('users')
-        .select(`
-          *,
-          wallets (*)
-        `)
-        .eq('id', userId)
-        .single()
+      const user = await this.db.getUserWithWallets(userId)
 
-      if (error) {
-        console.error('Get current user error:', error)
+      if (!user) {
         return null
       }
 
@@ -252,14 +221,7 @@ export class WalletAuthService {
   // Update user profile
   async updateProfile(userId: string, data: ProfileData): Promise<void> {
     try {
-      const { error } = await this.supabase
-        .from('users')
-        .update(data)
-        .eq('id', userId)
-
-      if (error) {
-        throw new Error(`Failed to update profile: ${error.message}`)
-      }
+      await this.db.updateUser(userId, data)
     } catch (error) {
       console.error('Update profile error:', error)
       throw error
